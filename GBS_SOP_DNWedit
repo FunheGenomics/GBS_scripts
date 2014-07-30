@@ -1,0 +1,182 @@
+GBS Standard Operating Protocol Draft (original by David I. Dayan, edits by DNW)
+#####################################
+
+#commands are not preceded by "#"
+
+###################################################################
+#####################   TASSEL SNP DISCOVERY  #####################
+###################################################################
+
+##################  Download and install necessary Programs and Scripts #################
+
+#Java 7 JDK (*DO NOT INSTALL JAVA 8 ON YOUR MACHINE!!! if you have previously installed Java 8 on your machine the pipeline will not work)
+	http://www.oracle.com/technetwork/java/javase/downloads/jdk7-downloads-1880260.html
+#Tassel 4.0 (Build June 26, 2014)
+ 	http://www.maizegenetics.net/index.php?option=com_content&task=view&id=89&Itemid=119
+#Bowtie2 (be sure to add bowtie2 into your PATH in your ".bash_profile")
+ 	http://bowtie-bio.sourceforge.net/bowtie2/index.shtml
+
+##################  Setup Files and Directory ######################
+
+# create working dir
+#make new directories for output per pipeline doc in working dir
+ mkdir tagCounts 
+ mkdir mergedTagCounts 
+ mkdir topm 
+ mkdir tbt 
+ mkdir mergedTBT 
+ mkdir hapmap
+ mkdir ./hapmap/mergedSNPs
+ mkdir ./hapmap/unfilt 
+ mkdir ./hapmap/filt 
+ mkdir ./hapmap/bpec
+ mkdir ./hapmap/raw
+
+#make sequence data dir (examples below use ./seqdata, Tassel4 used fastq)
+#move sequence data into directory
+
+#Find Lane info
+	##un-tarball one tar.gz file from sequencing center reveals fastq.gz in new directory
+	tar -xvf PP_fastq.tar.gz 
+#OR 
+	gunzip PP_fastq.gz
+	
+#retrieve flowcell and lane from resulting  fastq file (used cmd head (file will be too large to open), code should end in 'XX')
+	
+	#DNW -> "gunzip PP_fastq.gz" then "head PP_fastq"
+	#Rezip
+	
+#Create Barcode Key File from template (or use tassel GBS pipeline doc)
+	#will need lane info from above
+
+#renamed fastqfile to match barcode key with one of the following conventions: 
+	#flowcell_lane_fastq.txt
+	#FLOWCELL_LANE_fastq.txt.gz
+	#FLOWCELL_s_LANE_fastq.txt 
+	#FLOWCELL_s_LANE_fastq.txt.gz
+	#where "s" refers to some user generated code (not just underscores)
+	#DNW -> H9WYGADXX_s_1_fastq.gz
+	
+####################### FASTQ TO TAG COUNT ############################
+
+#run first step, using MseI as enzyme
+# Input dir should contain your sequence data
+
+~/programs/tassel4/run_pipeline.pl -fork1 -FastqToTagCountPlugin -i seqdata -k NBH_BarCode.txt -e MseI -o tagCounts -endPlugin -runfork1
+
+#DNW -> /Users/dom/scripts/programs/tassel4/run_pipeline.pl -fork1 -FastqToTagCountPlugin -i seqdata -k BARCODE_KEY_DNW.txt -e MseI -o tagCounts -endPlugin -runfork1
+
+#this should produces ~150million reads, >90% with barcode
+
+#DNW -> Total Reads:1000000 Reads with barcode and cut site overhang:934151
+Total Reads:2000000 Reads with barcode and cut site overhang:1812225
+Total Reads:3000000 Reads with barcode and cut site overhang:2615931
+Total Reads:4000000 Reads with barcode and cut site overhang:3444374
+Total number of reads in lane=4000000
+Total number of good barcoded reads=3444374
+Timing process (sorting, collapsing, and writing TagCount to file).
+Position index sort begin.
+Position index sort end.
+Position index sort begin.
+Position index sort end.
+Rows collapsed:2862287
+Unique tags retained:582087
+582087 tags will be output to tagCounts/H9WYGADXX_z_1.cnt
+These 582087 tags were covered by 3444374 matching reads
+Tags written to:tagCounts/H9WYGADXX_z_1.cnt
+Number of Tags in file:582087
+Process took 11074 milliseconds.
+Finished reading 35 of 35 sequence files.
+
+###################### MERGE MULTIPLE TAG COUNT ###################
+#step 2: merge tag counts 
+~/programs/tassel4/run_pipeline.pl -fork1 -MergeMultipleTagCountPlugin -i tagCounts -o mergedTagCounts/myMasterTags.cnt. -c 5 -t -endPlugin -runfork1
+
+#DNW -> /Users/dom/scripts/programs/tassel4/run_pipeline.pl -fork1 -MergeMultipleTagCountPlugin -i tagCounts -o mergedTagCounts/DNWMasterTags.cnt -c 5 -t -endPlugin -runfork1
+
+#step 2 again without -t option (to create binary copy of output if needed later)
+~/programs/tassel4/run_pipeline.pl -fork1 -MergeMultipleTagCountPlugin -i tagCounts -o mergedTagCounts/myMasterTags.cnt -c 5 -endPlugin -runfork1 
+
+#################### INDEX GENOME WITH BOWTIE ###########################
+
+#skip, use index from previous run
+
+#index files (to copy, or direct to in subsequent step) are named fun_index*
+#DNW -> genome index name "fun_bothgenome"
+
+###################### Align Tags to Genome ##############################
+
+bowtie2 -M 4 -p 4 --very-sensitive-local -x ./fun_index -U ./mergedTagCounts/myMasterTags.cnt.fq -S fun_sam.sam
+
+#DNW -> bowtie2 -p 4 --very-sensitive-local -x ./fun_bothgenome -U ./mergedTagCounts/DNWMasterTags.cnt.fq -S fun_sam.sam
+#DNW -> 785368 reads; of these:
+  785368 (100.00%) were unpaired; of these:
+    94213 (12.00%) aligned 0 times
+    356950 (45.45%) aligned exactly 1 time
+    334205 (42.55%) aligned >1 times
+88.00% overall alignment rate
+
+########################## SAM CONVERTER ##################################
+
+~/programs/tassel4/run_pipeline.pl -fork1 -SAMConverterPlugin -i fun_sam.sam -o topm/myMasterTags.topm -endPlugin -runfork1
+
+#DNW -> /Users/dom/scripts/programs/tassel4/run_pipeline.pl -fork1 -SAMConverterPlugin -i fun_sam.sam -o topm/DNWMasterTags.topm -endPlugin -runfork1
+#DNW -> Reading SAM format tag alignment from: /Users/dom/scripts/DNW_NJ_GBS/fun_sam.sam
+Found 785368 tags in SAM file.  Assuming BOWTIE2 file format.
+Read 0 tags.
+Position index sort begin.
+Position index sort end.
+Tag positions written to:topm/DNWMasterTags.topm
+Number of tags in file:785368
+
+########################## FastqToTBTPlugin ##################################
+
+~/programs/tassel/run_pipeline.pl -fork1 -FastqToTBTPlugin -i seqdata -k NBH_Barcode.txt -e MseI -o tbt -t mergedTagCounts/myMasterTags.cnt -y -endplugin -runfork1
+
+#DNW -> /Users/dom/scripts/programs/tassel4/run_pipeline.pl -fork1 -FastqToTBTPlugin -i seqdata -k BARCODE_KEY_DNW.txt -e MseI -o tbt -t mergedTagCounts/DNWMasterTags.cnt -y -endPlugin -runfork1
+#DNW -> Total barcodes found in lane:125
+
+when using multiple combined sequencing runs, use this format.  note the "-m" & topm file format:
+*****#DNW -> /Users/dom/scripts/programs/tassel4/run_pipeline.pl -fork1 -FastqToTBTPlugin -i seqdata -k BARCODE_KEY_DNW.txt -e MseI -o tbt -m topm/DNWMasterTags.topm -y -endPlugin -runfork1
+
+
+Total barcodes found in lane:125
+Total Reads:1000000 goodReads:934151 goodMatched:889776
+Total Reads:2000000 goodReads:1812225 goodMatched:1727553
+Total Reads:3000000 goodReads:2615931 goodMatched:2493409
+Total Reads:4000000 goodReads:3444374 goodMatched:3282349
+Timing process (writing TagsByTaxa file)...
+421528 tags will be output to H9WYGADXX_z_1.tbt.byte
+Tags written to:tbt/H9WYGADXX_z_1.tbt.byte
+Number of tags in file:421528
+...process (writing TagsByTaxa file) took 894 milliseconds.
+Total number of reads in lane=4000000
+Total number of good, barcoded reads=3444374
+Finished reading 35 of 35 sequence files: /Users/dom/scripts/DNW_NJ_GBS/seqdata/H9WYGADXX_z_1_fastq.gz
+
+######################### MERGE TBT FILES ######################################
+
+#Use this step only if you started with multiple .fastq files and did not merge them at the beginning
+
+~/programs/tassel/run_pipeline.pl -fork1 -MergeTagsByTaxaFilesPlugin -i tbt -o mergedTBT/myStudy.tbt.byte -endPlugin -runfork1
+
+#DNW -> /Users/dom/scripts/programs/tassel4/run_pipeline.pl -fork1 -MergeTagsByTaxaFilesPlugin -i tbt -o mergedTBT/DNW_GBS.tbt.byte -endPlugin -runfork1
+#DNW -> INFO - Scanning /Users/dom/scripts/DNW_NJ_GBS/tbt/H9WYGADXX_z_1.tbt.byte (file 35 of 35).
+[Thread-0] INFO net.maizegenetics.gbs.pipeline.MergeTagsByTaxaFilesPlugin - Scanning /Users/dom/scripts/DNW_NJ_GBS/tbt/H9WYGADXX_z_1.tbt.byte (file 35 of 35).
+nBytes to end of taxa names: 3012 
+Read tag0
+Number of Taxa in file:125
+Number of Haplotypes in file:421528
+Tag:105077 BitSet:211300000 
+Tag:318890 BitSet:214900000 
+Tag:324889 BitSet:215000000 
+Tag:354101 BitSet:215500000 
+
+######################### SNP DISCOVERY ########################################
+
+
+~/programs/tassel4/run_pipeline.pl -fork1 -DiscoverySNPCallerPlugin -i mergedTBT/myStudy.tbt.byte -m topm/myMasterTags.topm -ref fun_genome.fa -sC 1 -eC 10180 -o hapmap/raw/yourfile_Gtypes_ctg+.hmp.txt.gz -y -endPlugin -runfork1
+
+#DNW -> /Users/dom/scripts/programs/tassel4/run_pipeline.pl -fork1 -DiscoverySNPCallerPlugin -i mergedTBT/DNW_GBS.tbt.byte -m topm/DNWMasterTags.topm -ref mitogenome.fa -sC 1 -eC 10180 -o hapmap/raw/DNW_Gtypes_ctg+.hmp.txt.gz -y -endPlugin -runfork1
+
+
